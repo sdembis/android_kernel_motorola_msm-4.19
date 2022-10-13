@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2016-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
  */
 
 #include <linux/clk.h>
@@ -559,6 +559,7 @@ static struct snd_soc_codec_conf *msm_codec_conf;
 static struct snd_soc_card snd_soc_card_bengal_msm;
 static int dmic_0_1_gpio_cnt;
 static int dmic_2_3_gpio_cnt;
+static u32 wcd_datalane_mismatch;
 
 static void *def_wcd_mbhc_cal(void);
 static void *def_rouleur_mbhc_cal(void);
@@ -4334,7 +4335,11 @@ static int msm_int_audrx_init(struct snd_soc_pcm_runtime *rtd)
 				data = (char*) of_device_get_match_data(
 								&pdev->dev);
 			if (data != NULL) {
-				if (!strncmp(data, "wcd937x",
+				if (wcd_datalane_mismatch) {
+					bolero_set_port_map(component,
+						ARRAY_SIZE(sm_port_map_khaje),
+						sm_port_map_khaje);
+				} else if (!strncmp(data, "wcd937x",
 						sizeof("wcd937x"))) {
 					bolero_set_port_map(component,
 						ARRAY_SIZE(sm_port_map),
@@ -5427,6 +5432,51 @@ static struct snd_soc_dai_link msm_awinic_be_dai_links[] = {
                 .ignore_suspend = 1,
         },
 };
+
+static struct snd_soc_dai_link_component awinic_codecs[] = {
+        {
+                .of_node = NULL,
+                .dai_name = "aw882xx-aif-1-34",
+                .name = "aw882xxacf_smartpa.1-0034",
+        },
+        {
+                .of_node = NULL,
+                .dai_name = "aw882xx-aif-1-37",
+                .name = "aw882xxacf_smartpa.1-0037",
+        },
+};
+
+static struct snd_soc_dai_link msm_stereo_awinic_be_dai_links[] = {
+        {
+                .name = LPASS_BE_PRI_MI2S_RX,
+                .stream_name = "Primary MI2S Playback",
+                .cpu_dai_name = "msm-dai-q6-mi2s.0",
+                .platform_name = "msm-pcm-routing",
+                .num_codecs = ARRAY_SIZE(awinic_codecs),
+                .codecs = awinic_codecs,
+                .no_pcm = 1,
+                .dpcm_playback = 1,
+                .id = MSM_BACKEND_DAI_PRI_MI2S_RX,
+                .be_hw_params_fixup = msm_be_hw_params_fixup,
+                .ops = &msm_mi2s_be_ops,
+                .ignore_suspend = 1,
+                .ignore_pmdown_time = 1,
+        },
+        {
+                .name = LPASS_BE_PRI_MI2S_TX,
+                .stream_name = "Primary MI2S Capture",
+                .cpu_dai_name = "msm-dai-q6-mi2s.0",
+                .platform_name = "msm-pcm-routing",
+                .num_codecs = ARRAY_SIZE(awinic_codecs),
+                .codecs = awinic_codecs,
+                .no_pcm = 1,
+                .dpcm_capture = 1,
+                .id = MSM_BACKEND_DAI_PRI_MI2S_TX,
+                .be_hw_params_fixup = msm_be_hw_params_fixup,
+                .ops = &msm_mi2s_be_ops,
+                .ignore_suspend = 1,
+        },
+};
 #endif
 
 #if !defined(CONFIG_SND_SMARTPA_AW882XX)
@@ -6261,7 +6311,7 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 				__func__);
 		} else {
 			dev_dbg(dev,"%s,aw,has-882xx=%d\n",__func__,has_awinic_pa);
-			if (has_awinic_pa) {
+			if (has_awinic_pa == 1) {
 				memcpy(msm_bengal_dai_links + total_links,
 					msm_awinic_fe_dai_links,
 					sizeof(msm_awinic_fe_dai_links));
@@ -6272,6 +6322,17 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 					sizeof(msm_awinic_be_dai_links));
 				total_links +=
 					ARRAY_SIZE(msm_awinic_be_dai_links);
+			} else if (has_awinic_pa == 2) {
+				memcpy(msm_bengal_dai_links + total_links,
+					msm_awinic_fe_dai_links,
+					sizeof(msm_awinic_fe_dai_links));
+				total_links +=
+					ARRAY_SIZE(msm_awinic_fe_dai_links);
+				memcpy(msm_bengal_dai_links + total_links,
+					msm_stereo_awinic_be_dai_links,
+					sizeof(msm_stereo_awinic_be_dai_links));
+				total_links +=
+				ARRAY_SIZE(msm_stereo_awinic_be_dai_links);
 			}
 		}
 #endif
@@ -6837,6 +6898,10 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 	ret = msm_init_aux_dev(pdev, card);
 	if (ret)
 		goto err;
+
+	ret = of_property_read_u32(pdev->dev.of_node,
+			"qcom,wcd-datalane-mismatch",
+			&wcd_datalane_mismatch);
 
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	if (ret == -EPROBE_DEFER) {
