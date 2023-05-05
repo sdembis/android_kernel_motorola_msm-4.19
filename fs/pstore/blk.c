@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+/// SPDX-License-Identifier: GPL-2.0
 /*
  * Implements pstore backend driver that write to block (or non-block) storage
  * devices, using the pstore/zone API.
@@ -319,6 +319,11 @@ static int __init __best_effort_init(void)
 	if (!blkdev[0]) {
 		pr_err("blkdev empty with best_effort=Y\n");
 		return -EINVAL;
+	}
+
+	if (strnstr(saved_command_line, "androidboot.mode=recovery", strlen(saved_command_line)))
+	{
+		return 0;
 	}
 
 	best_effort_dev = kzalloc(sizeof(*best_effort_dev), GFP_KERNEL);
